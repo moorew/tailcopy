@@ -123,6 +123,25 @@ fn main() {
     pump(Duration::from_millis(300));
     assert_eq!(active_title(), "TailCopy smoke");
     println!("ok: present() switches focus");
+
+    // 6. Reading, focusing and pasting don't keep X connections open.
+    let sockets = || {
+        std::fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(|e| std::fs::read_link(e.ok()?.path()).ok())
+            .filter(|l| l.to_string_lossy().starts_with("socket:"))
+            .count()
+    };
+    let before = sockets();
+    for _ in 0..20 {
+        off_main(|| {
+            x11::read().expect("read");
+            x11::foreground();
+            x11::present("TailCopy smoke");
+        });
+    }
+    assert_eq!(sockets(), before, "X connections leaked");
+    println!("ok: no X connections leaked");
 }
 
 #[cfg(target_os = "linux")]
