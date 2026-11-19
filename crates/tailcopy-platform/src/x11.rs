@@ -3,7 +3,7 @@
 //! keystroke. Shortcuts come from Tauri's global shortcut plugin.
 
 use std::{
-    sync::mpsc,
+    sync::{Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -63,10 +63,21 @@ pub fn watch() -> Result<mpsc::Receiver<()>> {
     Ok(rx)
 }
 
+/// The clipboard-rs context, made on first read and kept: each one opens two X
+/// connections and a thread that waits on one of them forever, so a context per read
+/// used up the server's client limit.
+static CONTEXT: Mutex<Option<ClipboardContext>> = Mutex::new(None);
+
 /// Reads the formats TailCopy stores from the CLIPBOARD selection. Runs off the GTK
 /// main thread: when TailCopy owns the selection, GTK serves it from there.
 pub fn read() -> Result<Captured> {
-    let ctx = ClipboardContext::new().map_err(|e| Error::Clipboard(e.to_string()))?;
+    let mut context = CONTEXT.lock().unwrap_or_else(|e| e.into_inner());
+    let ctx = match context.as_mut() {
+        Some(ctx) => ctx,
+        None => {
+            context.insert(ClipboardContext::new().map_err(|e| Error::Clipboard(e.to_string()))?)
+        }
+    };
     let raw_types = ctx.available_formats().unwrap_or_default();
     let offered = |mime: &str| raw_types.iter().any(|t| t == mime);
     let get = |mime: &str| ctx.get_buffer(mime).ok().filter(|b| !b.is_empty());
